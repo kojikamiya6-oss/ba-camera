@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>ビフォアアフター撮影</title>
+<style>
+:root{--bg:#111;--fg:#fff;--accent:#ff9f1c;--pane:#222;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+*{box-sizing:border-box}
+body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+.panes{flex:1;display:flex;gap:2px;min-height:0}
+.pane{flex:1;position:relative;overflow:hidden;background:var(--pane);min-width:0}
+.pane img,.pane video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#ov{opacity:0;pointer-events:none}
+.tag{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.55);padding:3px 10px;border-radius:12px;font-size:12px;z-index:2}
+.hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;font-size:14px;color:#aaa;z-index:1}
+.bar{display:flex;align-items:center;justify-content:space-around;padding:12px 8px;background:#000}
+button,label.btn{background:#2a2a2a;color:var(--fg);border:0;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit}
+button.on{background:var(--accent);color:#000}
+#shot{width:68px;height:68px;border-radius:50%;background:#fff;border:5px solid #888;padding:0}
+#shot:active{background:var(--accent)}
+.slider{display:none;padding:6px 16px;background:#000;align-items:center;gap:10px;font-size:12px}
+.slider.show{display:flex}
+.slider input{flex:1}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:10;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px))}
+#modal.show{display:flex}
+#modal img{max-width:100%;max-height:68%;border-radius:6px}
+#modal p{margin:0;font-size:12px;color:#aaa}
+#err{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));background:#b00020;padding:10px;border-radius:8px;font-size:13px;display:none;z-index:20}
+</style>
+</head>
+<body>
+<div class="panes">
+  <div class="pane">
+    <span class="tag">ビフォア</span>
+    <div class="hint" id="hint">下の「写真を選ぶ」で<br>ビフォア写真を読み込み</div>
+    <img id="before" alt="">
+  </div>
+  <div class="pane">
+    <span class="tag">アフター</span>
+    <video id="cam" autoplay playsinline muted></video>
+    <img id="ov" alt="">
+  </div>
+</div>
+<div class="slider" id="sl"><span>重ね具合</span><input type="range" id="op" min="0" max="100" value="40"></div>
+<div class="bar">
+  <label class="btn">写真を選ぶ<input type="file" id="file" accept="image/*" hidden></label>
+  <button id="ovBtn">重ねる</button>
+  <button id="shot" aria-label="撮影"></button>
+  <button id="flip">反転</button>
+</div>
+<div id="modal">
+  <img id="result" alt="">
+  <p>画像を長押しで保存、または下のボタンで共有</p>
+  <div style="display:flex;gap:10px">
+    <button id="share">共有・保存</button>
+    <button id="close">閉じる</button>
+  </div>
+</div>
+<div id="err"></div>
+<script>
+const $=id=>document.getElementById(id);
+const cam=$('cam'),before=$('before'),ov=$('ov');
+let stream=null,facing='environment',ratio=null,blob=null;
+
+function showErr(m){const e=$('err');e.textContent=m;e.style.display='block';setTimeout(()=>e.style.display='none',6000)}
+
+async function startCam(){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  const v={facingMode:{ideal:facing},width:{ideal:1920},height:{ideal:1080}};
+  if(ratio)v.aspectRatio={ideal:ratio};
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:v,audio:false});
+    cam.srcObject=stream;
+  }catch(e){
+    showErr('カメラを起動できません。ブラウザのサイト設定でカメラを許可してください。');
+  }
+}
+
+$('file').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const url=URL.createObjectURL(f);
+  const im=new Image();
+  im.onload=()=>{
+    before.src=url;ov.src=url;$('hint').style.display='none';
+    ratio=im.naturalWidth/im.naturalHeight;
+    startCam();
+  };
+  im.src=url;
+});
+
+$('flip').onclick=()=>{facing=facing==='environment'?'user':'environment';startCam()};
+
+let overlayOn=false;
+$('ovBtn').onclick=()=>{
+  overlayOn=!overlayOn;
+  $('ovBtn').classList.toggle('on',overlayOn);
+  $('sl').classList.toggle('show',overlayOn);
+  ov.style.opacity=overlayOn?$('op').value/100:0;
+};
+$('op').oninput=e=>{if(overlayOn)ov.style.opacity=e.target.value/100};
+
+$('shot').onclick=()=>{
+  if(!before.src){showErr('先にビフォア写真を選んでください');return}
+  if(!cam.videoWidth){showErr('カメラが準備できていません');return}
+  const h=Math.min(before.naturalHeight,1600);
+  const bw=before.naturalWidth*h/before.naturalHeight;
+  const aw=cam.videoWidth*h/cam.videoHeight;
+  const c=document.createElement('canvas');
+  c.width=Math.round(bw+aw+8);c.height=h;
+  const g=c.getContext('2d');
+  g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+  g.drawImage(before,0,0,bw,h);
+  g.drawImage(cam,bw+8,0,aw,h);
+  c.toBlob(b=>{
+    blob=b;
+    $('result').src=URL.createObjectURL(b);
+    $('modal').classList.add('show');
+  },'image/jpeg',.92);
+};
+
+$('close').onclick=()=>$('modal').classList.remove('show');
+$('share').onclick=async()=>{
+  if(!blob)return;
+  const file=new File([blob],'before-after.jpg',{type:'image/jpeg'});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file]})}
+    else showErr('共有に対応していません。画像を長押しして保存してください');
+  }catch(e){}
+};
+
+startCam();
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{})}
+</script>
+</body>
+</html>
