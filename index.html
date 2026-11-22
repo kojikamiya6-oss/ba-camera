@@ -64,8 +64,8 @@ button.on{background:var(--accent);color:#000}
 <div id="modal">
   <img id="result" alt="">
   <div style="display:flex;gap:8px">
-    <button id="tBoth" class="on">並べた画像</button>
-    <button id="tAfter">アフターのみ</button>
+    <button id="tAfter" class="on">アフターのみ</button>
+    <button id="tBoth">並べた画像</button>
   </div>
   <div style="display:flex;gap:10px">
     <button id="save">保存</button>
@@ -167,7 +167,7 @@ $('shot').onclick=()=>{
   c.toBlob(b1=>{
     c2.toBlob(b2=>{
       blobs={both:b1,after:b2};
-      show('both');
+      show('after');
       $('modal').classList.add('show');
     },'image/jpeg',.95);
   },'image/jpeg',.92);
