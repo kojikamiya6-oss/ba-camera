@@ -15,6 +15,7 @@ body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:-appl
 .panes{flex:1;display:flex;gap:2px;min-height:0}
 .pane{flex:1;position:relative;overflow:hidden;background:var(--pane);min-width:0}
 .pane img,.pane video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+/*mini*/.mini{position:absolute;top:6px;right:6px;z-index:3;display:flex;gap:6px}.mini button{padding:5px 9px;font-size:12px;background:rgba(0,0,0,.6)}
 #ov{opacity:0;pointer-events:none}
 .tag{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.55);padding:3px 10px;border-radius:12px;font-size:12px;z-index:2}
 .hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;font-size:14px;color:#aaa;z-index:1}
@@ -43,7 +44,8 @@ button.on{background:var(--accent);color:#000}
 <div class="panes">
   <div class="pane">
     <span class="tag">ビフォア</span>
-    <div class="hint" id="hint">下の「写真を選ぶ」で<br>ビフォア写真を読み込み</div>
+    <div class="mini" id="mini" style="display:none"><button id="bSave">保存</button><button id="bClear">消去</button></div>
+    <div class="hint" id="hint">シャッターでビフォアを撮影<br>または「写真を選ぶ」で読み込み</div>
     <img id="before" alt="">
   </div>
   <div class="pane">
@@ -77,7 +79,7 @@ const $=id=>document.getElementById(id);
 const cam=$('cam'),before=$('before'),ov=$('ov');
 let stream=null,facing='environment',ratio=null,blob=null,blobs={},cur='both';
 
-function showErr(m){const e=$('err');e.textContent=m;e.style.display='block';setTimeout(()=>e.style.display='none',6000)}
+function showErr(m,ok){const e=$('err');e.textContent=m;e.style.background=ok?'#2e7d32':'#b00020';e.style.display='block';setTimeout(()=>e.style.display='none',ok?2500:6000)}
 
 async function startCam(){
   if(stream)stream.getTracks().forEach(t=>t.stop());
@@ -91,17 +93,50 @@ async function startCam(){
   }
 }
 
-$('file').addEventListener('change',e=>{
-  const f=e.target.files[0];if(!f)return;
-  const url=URL.createObjectURL(f);
+function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('ba',1);r.onupgradeneeded=()=>r.result.createObjectStore('k');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function idbSet(v){try{const d=await idb();d.transaction('k','readwrite').objectStore('k').put(v,'before')}catch(e){}}
+async function idbGet(){try{const d=await idb();return await new Promise(res=>{const q=d.transaction('k').objectStore('k').get('before');q.onsuccess=()=>res(q.result);q.onerror=()=>res(null)})}catch(e){return null}}
+async function idbDel(){try{const d=await idb();d.transaction('k','readwrite').objectStore('k').delete('before')}catch(e){}}
+
+function dl(blob,name){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();
+}
+function stamp(){const t=new Date(),p=n=>String(n).padStart(2,'0');return t.getFullYear()+p(t.getMonth()+1)+p(t.getDate())+'-'+p(t.getHours())+p(t.getMinutes())+p(t.getSeconds())}
+
+let beforeBlob=null;
+function setBefore(b,persist,fromCam){
+  beforeBlob=b;
+  const url=URL.createObjectURL(b);
   const im=new Image();
   im.onload=()=>{
-    before.src=url;ov.src=url;$('hint').style.display='none';
+    before.src=url;ov.src=url;$('hint').style.display='none';$('mini').style.display='flex';
     ratio=im.naturalWidth/im.naturalHeight;
-    startCam();
+    if(!fromCam)startCam();
   };
   im.src=url;
+  if(persist)idbSet(b);
+}
+
+function captureBefore(){
+  const c=document.createElement('canvas');
+  c.width=cam.videoWidth;c.height=cam.videoHeight;
+  c.getContext('2d').drawImage(cam,0,0);
+  c.toBlob(b=>{setBefore(b,true,true);showErr('ビフォア写真をセットしました（アプリに記憶されます）',true)},'image/jpeg',.95);
+}
+
+$('file').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  setBefore(f,true,false);
 });
+$('bSave').onclick=()=>{if(beforeBlob)dl(beforeBlob,'before_'+stamp()+'.jpg')};
+$('bClear').onclick=()=>{
+  if(!confirm('ビフォア写真を消去しますか？'))return;
+  beforeBlob=null;before.removeAttribute('src');ov.removeAttribute('src');
+  $('hint').style.display='flex';$('mini').style.display='none';
+  ratio=null;idbDel();startCam();
+};
 
 $('flip').onclick=()=>{facing=facing==='environment'?'user':'environment';startCam()};
 
@@ -115,8 +150,8 @@ $('ovBtn').onclick=()=>{
 $('op').oninput=e=>{if(overlayOn)ov.style.opacity=e.target.value/100};
 
 $('shot').onclick=()=>{
-  if(!before.src){showErr('先にビフォア写真を選んでください');return}
   if(!cam.videoWidth){showErr('カメラが準備できていません');return}
+  if(!before.getAttribute('src')){captureBefore();return}
   const h=Math.min(before.naturalHeight,1600);
   const bw=before.naturalWidth*h/before.naturalHeight;
   const aw=cam.videoWidth*h/cam.videoHeight;
@@ -166,7 +201,7 @@ $('share').onclick=async()=>{
 };
 
 try{screen.orientation.lock('landscape').catch(()=>{})}catch(e){}
-startCam();
+idbGet().then(b=>{if(b)setBefore(b,false,false);else startCam()});
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{})}
 </script>
 </body>
