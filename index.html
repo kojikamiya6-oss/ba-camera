@@ -31,6 +31,12 @@ button.on{background:var(--accent);color:#000}
 #modal img{max-width:100%;max-height:68%;border-radius:6px}
 #modal p{margin:0;font-size:12px;color:#aaa}
 #err{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));background:#b00020;padding:10px;border-radius:8px;font-size:13px;display:none;z-index:20}
+@media (orientation:landscape){
+  body{flex-direction:row}
+  .bar{flex-direction:column;padding:8px 10px;padding-right:calc(10px + env(safe-area-inset-right,0px));gap:8px}
+  .slider{position:fixed;left:12px;bottom:12px;right:140px;border-radius:10px;background:rgba(0,0,0,.7)}
+  #modal img{max-height:60%}
+}
 </style>
 </head>
 <body>
@@ -55,9 +61,13 @@ button.on{background:var(--accent);color:#000}
 </div>
 <div id="modal">
   <img id="result" alt="">
-  <p>画像を長押しで保存、または下のボタンで共有</p>
+  <div style="display:flex;gap:8px">
+    <button id="tBoth" class="on">並べた画像</button>
+    <button id="tAfter">アフターのみ</button>
+  </div>
   <div style="display:flex;gap:10px">
-    <button id="share">共有・保存</button>
+    <button id="save">保存</button>
+    <button id="share">共有</button>
     <button id="close">閉じる</button>
   </div>
 </div>
@@ -65,7 +75,7 @@ button.on{background:var(--accent);color:#000}
 <script>
 const $=id=>document.getElementById(id);
 const cam=$('cam'),before=$('before'),ov=$('ov');
-let stream=null,facing='environment',ratio=null,blob=null;
+let stream=null,facing='environment',ratio=null,blob=null,blobs={},cur='both';
 
 function showErr(m){const e=$('err');e.textContent=m;e.style.display='block';setTimeout(()=>e.style.display='none',6000)}
 
@@ -116,17 +126,39 @@ $('shot').onclick=()=>{
   g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
   g.drawImage(before,0,0,bw,h);
   g.drawImage(cam,bw+8,0,aw,h);
-  c.toBlob(b=>{
-    blob=b;
-    $('result').src=URL.createObjectURL(b);
-    $('modal').classList.add('show');
+  const c2=document.createElement('canvas');
+  c2.width=cam.videoWidth;c2.height=cam.videoHeight;
+  c2.getContext('2d').drawImage(cam,0,0);
+  c.toBlob(b1=>{
+    c2.toBlob(b2=>{
+      blobs={both:b1,after:b2};
+      show('both');
+      $('modal').classList.add('show');
+    },'image/jpeg',.95);
   },'image/jpeg',.92);
+};
+
+function show(k){
+  cur=k;blob=blobs[k];
+  $('result').src=URL.createObjectURL(blob);
+  $('tBoth').classList.toggle('on',k==='both');
+  $('tAfter').classList.toggle('on',k==='after');
+}
+$('tBoth').onclick=()=>show('both');
+$('tAfter').onclick=()=>show('after');
+$('save').onclick=()=>{
+  if(!blob)return;
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  const t=new Date(),p=n=>String(n).padStart(2,'0');
+  a.download=(cur==='after'?'after_':'before-after_')+t.getFullYear()+p(t.getMonth()+1)+p(t.getDate())+'-'+p(t.getHours())+p(t.getMinutes())+p(t.getSeconds())+'.jpg';
+  document.body.appendChild(a);a.click();a.remove();
 };
 
 $('close').onclick=()=>$('modal').classList.remove('show');
 $('share').onclick=async()=>{
   if(!blob)return;
-  const file=new File([blob],'before-after.jpg',{type:'image/jpeg'});
+  const file=new File([blob],(cur==='after'?'after.jpg':'before-after.jpg'),{type:'image/jpeg'});
   try{
     if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file]})}
     else showErr('共有に対応していません。画像を長押しして保存してください');
